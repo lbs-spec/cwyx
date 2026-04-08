@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>赣锋锂业 · 实时量化监测终端</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #111827;
+  --bg-card: #1a1f2e;
+  --bg-hover: #242a3d;
+  --border: #2a3148;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59,130,246,0.15);
+  --green: #10b981;
+  --green-bg: rgba(16,185,129,0.1);
+  --red: #ef4444;
+  --red-bg: rgba(239,68,68,0.1);
+  --yellow: #f59e0b;
+  --yellow-bg: rgba(245,158,11,0.1);
+  --cyan: #06b6d4;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+.header {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky; top: 0; z-index: 100;
+}
+.header h1 {
+  font-size: 18px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.header-info { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--text-muted); }
+.status-dot { width:8px; height:8px; border-radius:50%; background:var(--green); display:inline-block; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.refresh-timer { font-family: monospace; }
+
+.container { max-width: 1600px; margin: 0 auto; padding: 16px; }
+
+/* Price Cards */
+.price-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.price-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  position: relative;
+  overflow: hidden;
+}
+.price-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--cyan));
+}
+.price-card.hk::before { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+.stock-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.stock-name { font-size: 14px; font-weight: 600; }
+.stock-code { font-size: 11px; color: var(--text-muted); background: var(--bg-hover); padding: 2px 8px; border-radius: 4px; }
+.stock-price { font-size: 32px; font-weight: 700; font-family: 'SF Mono', 'Cascadia Code', monospace; line-height: 1.2; }
+.stock-change { font-size: 14px; margin-top: 4px; font-weight: 500; }
+.up { color: var(--green); }
+.down { color: var(--red); }
+.flat { color: var(--text-secondary); }
+.stock-meta { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.meta-item { text-align: center; }
+.meta-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.meta-value { font-size: 13px; font-weight: 500; margin-top: 2px; font-family: monospace; }
+
+/* Controls */
+.controls {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 8px 16px;
+}
+.btn {
+  padding: 6px 16px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg-hover); color: var(--text-secondary); cursor: pointer;
+  font-size: 13px; transition: all 0.2s;
+}
+.btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.select-wrap select {
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg-hover); color: var(--text-primary); font-size: 13px;
+}
+
+/* Chart */
+.chart-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.chart-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.chart-title { font-size: 14px; font-weight: 600; }
+.chart-container { width: 100%; height: 420px; }
+@media(max-width:768px) { .chart-container { height: 300px; } }
+
+/* Indicators Grid */
+.indicators-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+@media(max-width:1024px) { .indicators-row { grid-template-columns: repeat(2,1fr); } }
+@media(max-width:640px) { .indicators-row { grid-template-columns: 1fr; } .price-row { grid-template-columns: 1fr; } }
+
+.ind-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.ind-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+.ind-value { font-size: 24px; font-weight: 700; font-family: monospace; }
+.ind-sub { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.ind-bar { height: 4px; border-radius: 2px; background: var(--bg-hover); margin-top: 8px; overflow: hidden; }
+.ind-bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+
+/* Signal Card */
+.signal-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.signal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.signal-badge {
+  padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+}
+.signal-buy { background: var(--green-bg); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+.signal-sell { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+.signal-hold { background: var(--yellow-bg); color: var(--yellow); border: 1px solid rgba(245,158,11,0.3); }
+.signal-neutral { background: var(--bg-hover); color: var(--text-secondary); border: 1px solid var(--border); }
+
+.signal-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 12px; }
+.signal-item { display: flex; align-items: center; gap: 8px; }
+.signal-item .dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.signal-item .label { font-size: 12px; color: var(--text-muted); }
+.signal-item .val { font-size: 13px; font-weight: 600; margin-left: auto; }
+
+/* Position suggestion */
+.position-bar {
+  display: flex; height: 32px; border-radius: 8px; overflow: hidden; margin: 12px 0;
+  background: var(--bg-hover);
+}
+.position-fill {
+  height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; transition: width 0.5s;
+}
+.position-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+
+.risk-note {
+  background: var(--bg-hover);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-top: 12px;
+}
+
+/* MACD mini chart */
+.macd-bars { display: flex; align-items: flex-end; gap: 2px; height: 40px; margin-top: 8px; }
+.macd-bar { width: 6px; border-radius: 1px; transition: height 0.3s; min-height: 2px; }
+
+/* Loading */
+.loading-overlay {
+  position: fixed; top:0; left:0; right:0; bottom:0;
+  background: var(--bg-primary); display: flex; align-items: center; justify-content: center;
+  z-index: 9999; flex-direction: column; gap: 16px;
+  transition: opacity 0.5s;
+}
+.loading-overlay.hidden { opacity: 0; pointer-events: none; }
+.spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toast {
+  position: fixed; top: 80px; right: 20px;
+  padding: 10px 20px; border-radius: 8px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  font-size: 13px; z-index: 1000;
+  transform: translateX(120%); transition: transform 0.3s;
+}
+.toast.show { transform: translateX(0); }
+.toast.error { border-color: var(--red); color: var(--red); }
+.toast.success { border-color: var(--green); color: var(--green); }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <div style="font-size:14px;color:var(--text-muted)">正在加载行情数据...</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<header class="header">
+  <h1>⬡ 赣锋锂业 · 实时量化监测终端</h1>
+  <div class="header-info">
+    <span class="status-dot"></span>
+    <span>实时连接</span>
+    <span class="refresh-timer" id="refreshTimer">--</span>
+  </div>
+</header>
+
+<div class="container">
+  <!-- Price Cards -->
+  <div class="price-row">
+    <div class="price-card" id="cardSZ">
+      <div class="stock-label">
+        <span class="stock-name">赣锋锂业</span>
+        <span class="stock-code">002460.SZ</span>
+      </div>
+      <div class="stock-price" id="priceSZ">--</div>
+      <div class="stock-change" id="changeSZ">--</div>
+      <div class="stock-meta">
+        <div class="meta-item"><div class="meta-label">今开</div><div class="meta-value" id="openSZ">--</div></div>
+        <div class="meta-item"><div class="meta-label">最高</div><div class="meta-value" id="highSZ">--</div></div>
+        <div class="meta-item"><div class="meta-label">最低</div><div class="meta-value" id="lowSZ">--</div></div>
+        <div class="meta-item"><div class="meta-label">成交量</div><div class="meta-value" id="volSZ">--</div></div>
+        <div class="meta-item"><div class="meta-label">成交额</div><div class="meta-value" id="amtSZ">--</div></div>
+        <div class="meta-item"><div class="meta-label">换手率</div><div class="meta-value" id="turnSZ">--</div></div>
+      </div>
+    </div>
+    <div class="price-card hk" id="cardHK">
+      <div class="stock-label">
+        <span class="stock-name">赣锋锂业</span>
+        <span class="stock-code">01772.HK</span>
+      </div>
+      <div class="stock-price" id="priceHK">--</div>
+      <div class="stock-change" id="changeHK">--</div>
+      <div class="stock-meta">
+        <div class="meta-item"><div class="meta-label">今开</div><div class="meta-value" id="openHK">--</div></div>
+        <div class="meta-item"><div class="meta-label">最高</div><div class="meta-value" id="highHK">--</div></div>
+        <div class="meta-item"><div class="meta-label">最低</div><div class="meta-value" id="lowHK">--</div></div>
+        <div class="meta-item"><div class="meta-label">成交量</div><div class="meta-value" id="volHK">--</div></div>
+        <div class="meta-item"><div class="meta-label">成交额</div><div class="meta-value" id="amtHK">--</div></div>
+        <div class="meta-item"><div class="meta-label">换手率</div><div class="meta-value" id="turnHK">--</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="select-wrap">
+      <select id="stockSelect" onchange="switchStock()">
+        <option value="sz">A股 · 002460.SZ</option>
+        <option value="hk">港股 · 01772.HK</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:4px">
+      <button class="btn active" id="btnDaily" onclick="setPeriod('daily')">日线</button>
+      <button class="btn" id="btnWeekly" onclick="setPeriod('weekly')">周线</button>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:4px;align-items:center">
+      <span style="font-size:11px;color:var(--text-muted)">自动刷新</span>
+      <select id="intervalSelect" onchange="setRefreshInterval()">
+        <option value="15">15秒</option>
+        <option value="30" selected>30秒</option>
+        <option value="60">60秒</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-section">
+    <div class="chart-header">
+      <span class="chart-title" id="chartTitle">赣锋锂业 002460.SZ · 日线</span>
+      <span style="font-size:11px;color:var(--text-muted)" id="dataRange">--</span>
+    </div>
+    <div class="chart-container" id="mainChart"></div>
+  </div>
+
+  <!-- Indicators -->
+  <div class="indicators-row">
+    <div class="ind-card">
+      <div class="ind-label">MACD (12,26,9)</div>
+      <div class="ind-value" id="macdValue">--</div>
+      <div class="ind-sub" id="macdSub">--</div>
+      <div class="macd-bars" id="macdBars"></div>
+    </div>
+    <div class="ind-card">
+      <div class="ind-label">RSI (14) · 周期股阈值</div>
+      <div class="ind-value" id="rsiValue">--</div>
+      <div class="ind-sub" id="rsiSub">--</div>
+      <div class="ind-bar"><div class="ind-bar-fill" id="rsiBar" style="width:0;background:var(--accent)"></div></div>
+    </div>
+    <div class="ind-card">
+      <div class="ind-label">布林带位置 (20, 2.5σ)</div>
+      <div class="ind-value" id="bbValue">--</div>
+      <div class="ind-sub" id="bbSub">--</div>
+      <div class="ind-bar"><div class="ind-bar-fill" id="bbBar" style="width:0;background:var(--cyan)"></div></div>
+    </div>
+    <div class="ind-card">
+      <div class="ind-label">综合评分 · 去饱和映射</div>
+      <div class="ind-value" id="scoreValue">--</div>
+      <div class="ind-sub" id="scoreSub">--</div>
+      <div class="ind-bar"><div class="ind-bar-fill" id="scoreBar" style="width:0;background:var(--accent)"></div></div>
+    </div>
+  </div>
+
+  <!-- Signal -->
+  <div class="signal-card">
+    <div class="signal-header">
+      <span style="font-size:15px;font-weight:600">📊 量化交易建议</span>
+      <span class="signal-badge signal-neutral" id="signalBadge">加载中...</span>
+    </div>
+    <div class="signal-details" id="signalDetails">
+      <div class="signal-item"><span class="dot" style="background:var(--text-muted)"></span><span class="label">建议操作</span><span class="val" id="sigAction">--</span></div>
+      <div class="signal-item"><span class="dot" style="background:var(--text-muted)"></span><span class="label">建议仓位</span><span class="val" id="sigPosition">--</span></div>
+      <div class="signal-item"><span class="dot" style="background:var(--text-muted)"></span><span class="label">信号强度</span><span class="val" id="sigStrength">--</span></div>
+      <div class="signal-item"><span class="dot" style="background:var(--text-muted)"></span><span class="label">趋势判断</span><span class="val" id="sigTrend">--</span></div>
+      <div class="signal-item"><span class="dot" style="background:var(--text-muted)"></span><span class="label">支撑位</span><span class="val" id="sigSupport">--</span></div>
+      <div class="signal-item"><span class="dot" style="background:var(--text-muted)"></span><span class="label">压力位</span><span class="val" id="sigResist">--</span></div>
+    </div>
+    <div class="position-label">仓位建议参考</div>
+    <div class="position-bar">
+      <div class="position-fill" id="posFill" style="width:0;background:linear-gradient(90deg,var(--green),var(--cyan))">0%</div>
+    </div>
+    <div class="risk-note">
+      ⚠️ 免责声明：以上建议基于纯技术面量化模型生成，不构成任何投资建议。资源/周期股受宏观经济、行业政策、商品价格等多重因素影响，量化信号仅供参考，投资决策请结合基本面分析独立判断。股市有风险，入市需谨慎。
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================
+// 全局状态
+// ============================================
+const STATE = {
+  currentStock: 'sz',  // 'sz' or 'hk'
+  period: 'daily',     // 'daily' or 'weekly'
+  refreshInterval: 30,
+  klineData: [],       // {time, open, high, low, close, volume}
+  historyHigh: { sz: 158.12, hk: 129.76 },  // 前复权历史最高价（突破后恢复正常策略，允许清仓）
+  chart: null,
+  candleSeries: null,
+  volumeSeries: null,
+  maLines: {},
+  bbUpper: null,
+  bbLower: null,
+  markers: [],
+  refreshCountdown: 30,
+};
+
+// ============================================
+// 新浪财经数据源配置（通过本地代理）
+// ============================================
+// A股: sz002460  港股: rt_hk01772
+// K线 scale: 240=日线, 1200=周线
+
+// ============================================
+// 工具函数
+// ============================================
+function fmt(n, d=2) { return (n == null || isNaN(n)) ? '--' : Number(n).toFixed(d); }
+function fmtVol(n) {
+  if (n == null || isNaN(n)) return '--';
+  n = Number(n);
+  if (n >= 1e8) return (n/1e8).toFixed(2) + '亿';
+  if (n >= 1e4) return (n/1e4).toFixed(1) + '万';
+  return n.toString();
+}
+function fmtAmt(n) {
+  if (n == null || isNaN(n)) return '--';
+  n = Number(n);
+  if (n >= 1e8) return (n/1e8).toFixed(2) + '亿';
+  if (n >= 1e4) return (n/1e4).toFixed(1) + '万';
+  return n.toFixed(0);
+}
+
+function showToast(msg, type='success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+async function fetchText(url) {
+  try {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 10000);
+    const r = await fetch(url, { signal: controller.signal });
+    clearTimeout(tid);
+    return await r.text();
+  } catch(e) {
+    console.error('Fetch failed:', url, e);
+    return null;
+  }
+}
+
+// ============================================
+// 技术指标计算
+// ============================================
+function calcMA(data, period) {
+  const result = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) { result.push(null); continue; }
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += data[j].close;
+    result.push(sum / period);
+  }
+  return result;
+}
+
+function calcEMA(values, period) {
+  const k = 2 / (period + 1);
+  const result = [];
+  let ema = values[0];
+  result.push(ema);
+  for (let i = 1; i < values.length; i++) {
+    ema = values[i] * k + ema * (1 - k);
+    result.push(ema);
+  }
+  return result;
+}
+
+function calcMACD(data) {
+  const closes = data.map(d => d.close);
+  const ema12 = calcEMA(closes, 12);
+  const ema26 = calcEMA(closes, 26);
+  const dif = ema12.map((v, i) => v - ema26[i]);
+  const dea = calcEMA(dif, 9);
+  const macd = dif.map((v, i) => (v - dea[i]) * 2);
+  return { dif, dea, macd };
+}
+
+function calcRSI(data, period = 14) {
+  const result = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period) { result.push(null); continue; }
+    let gains = 0, losses = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const change = data[j].close - data[j-1].close;
+      if (change > 0) gains += change;
+      else losses -= change;
+    }
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+  }
+  return result;
+}
+
+function calcBollinger(data, period = 20, mult = 2.5) {
+  const upper = [], lower = [], mid = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) { upper.push(null); lower.push(null); mid.push(null); continue; }
+    let sum = 0;
+    for (let j = i - period + 1; j <= i; j++) sum += data[j].close;
+    const ma = sum / period;
+    mid.push(ma);
+    let sqSum = 0;
+    for (let j = i - period + 1; j <= i; j++) sqSum += (data[j].close - ma) ** 2;
+    const std = Math.sqrt(sqSum / period);
+    upper.push(ma + mult * std);
+    lower.push(ma - mult * std);
+  }
+  return { upper, lower, mid };
+}
+
+function calcATR(data, period = 14) {
+  // Average True Range
+  const tr = [];
+  for (let i = 1; i < data.length; i++) {
+    const high = data[i].high;
+    const low = data[i].low;
+    const prevClose = data[i-1].close;
+    tr.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+  }
+  if (tr.length < period) return tr;
+  // 简单移动平均
+  const result = [];
+  for (let i = 0; i < period - 1; i++) result.push(tr[i]);
+  let sum = tr.slice(0, period).reduce((a, b) => a + b, 0);
+  result.push(sum / period);
+  for (let i = period; i < tr.length; i++) {
+    sum = sum - tr[i - period] + tr[i];
+    result.push(sum / period);
+  }
+  return result;
+}
+
+// ============================================
+// 综合评分与信号生成（v2 — 去饱和 + 子维度归一化）
+// ============================================
+//
+// 架构：
+//   1. 每个维度产出 [-1, +1] 的归一化分数
+//   2. 加权合成 raw composite ∈ 大约 [-1.2, +1.2]
+//   3. tanh 映射到 [3, 97]，永远不贴死 0/100
+//   4. 动态权重：趋势强→MACD权重↑；趋势弱→RSI/布林带权重↑
+//   5. ATR 波动率适配：高波动自动降低仓位上限
+//   6. 动态历史高点：从K线计算，fallback 到手动设定
+//   7. 硬性止损：跌破 MA120 较大幅度时强制减仓
+//
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function tanhMap(raw, k = 0.55) {
+  // raw ∈ ℝ → [3, 97]，k 越小越早饱和
+  return Math.round(50 * (1 + Math.tanh(raw / k)) / 2 + 3);
+}
+
+function generateSignal(data) {
+  if (data.length < 60) return null;
+
+  const len = data.length;
+  const current = data[len - 1].close;
+
+  // ---- 计算指标 ----
+  const macd = calcMACD(data);
+  const rsi = calcRSI(data);
+  const bb = calcBollinger(data);
+  const atrArr = calcATR(data);
+  const ma5 = calcMA(data, 5);
+  const ma10 = calcMA(data, 10);
+  const ma20 = calcMA(data, 20);
+  const ma60 = calcMA(data, 60);
+  const ma120 = calcMA(data, 120);
+
+  const last = (arr) => arr[arr.length - 1];
+  const prev = (arr) => arr[arr.length - 2];
+  const lastDif = last(macd.dif), lastDea = last(macd.dea), lastMACD = last(macd.macd);
+  const prevDif = prev(macd.dif), prevDea = prev(macd.dea);
+  const lastRSI = last(rsi);
+  const lastBBU = last(bb.upper), lastBBL = last(bb.lower), lastBBM = last(bb.mid);
+  const lastMA5 = last(ma5), lastMA20 = last(ma20), lastMA60 = last(ma60), lastMA120 = last(ma120);
+  const lastATR = atrArr.length > 0 ? last(atrArr) : null;
+  const atrPct = lastATR ? lastATR / current : 0.03; // 默认3%
+
+  // ---- 动态历史高点：取K线内最高价 vs 手动设定，取大者 ----
+  const klineHigh = Math.max(...data.map(d => d.high));
+  const histHigh = Math.max(STATE.historyHigh[STATE.currentStock] || 0, klineHigh);
+
+  // ---- 动态52周高低点 ----
+  const lookback = Math.min(250, data.length);
+  const recentData = data.slice(-lookback);
+  const high52w = Math.max(...recentData.map(d => d.high));
+  const low52w = Math.min(...recentData.map(d => d.low));
+  const range52w = high52w - low52w;
+  const posIn52w = range52w > 0 ? (current - low52w) / range52w : 0.5;
+
+  // ========================================
+  // 子维度评分：每个维度 → [-1, +1]
+  // ========================================
+
+  // ---- 1. MACD 维度 ----
+  let macdScore = 0;
+  // (a) 金叉/死叉方向
+  macdScore += (lastDif > lastDea) ? 0.3 : -0.3;
+  // (b) 零轴位置
+  macdScore += (lastDif > 0) ? 0.15 : -0.15;
+  // (c) 柱体趋势
+  if (lastMACD > 0) macdScore += (lastMACD > prev(macd.macd)) ? 0.15 : -0.05;
+  else macdScore += (lastMACD < prev(macd.macd)) ? -0.15 : 0.05;
+  // (d) DIF斜率（3日变化）
+  const difSlope3 = len > 4 ? (lastDif - macd.dif[len-4]) / 3 : 0;
+  const difRef = Math.max(Math.abs(lastDif) * 0.05, 0.01);
+  macdScore += clamp(difSlope3 / difRef, -0.3, 0.3);
+  // (e) 金叉/死叉事件
+  if (prevDif <= prevDea && lastDif > lastDea) macdScore += 0.3;
+  if (prevDif >= prevDea && lastDif < lastDea) macdScore -= 0.3;
+  macdScore = clamp(macdScore, -1, 1);
+
+  // ---- 2. RSI 维度（周期股放宽阈值 20/80）----
+  let rsiScore = 0;
+  if (lastRSI != null) {
+    // (a) 当前位置映射
+    const rsiMid = 50;
+    rsiScore += clamp((rsiMid - lastRSI) / 30, -1, 1); // RSI越低分数越高
+    // (b) 连续超卖/超买天数
+    let rsiLowDays = 0, rsiHighDays = 0;
+    for (let i = len - 1; i >= 0 && rsi[i] != null && i > len - 10; i--) {
+      if (rsi[i] < 30) rsiLowDays++; else break;
+    }
+    for (let i = len - 1; i >= 0 && rsi[i] != null && i > len - 10; i--) {
+      if (rsi[i] > 70) rsiHighDays++; else break;
+    }
+    const persistBonus = Math.min(Math.max(rsiLowDays, rsiHighDays) / 5, 1.0);
+    if (rsiLowDays > 0) rsiScore += 0.2 * persistBonus; // 超卖越久越该买
+    if (rsiHighDays > 0) rsiScore -= 0.2 * persistBonus; // 超买越久越该卖
+    // (c) RSI变化方向
+    if (len > 2 && rsi[len-2] != null) {
+      const rsiDelta = lastRSI - rsi[len-2];
+      rsiScore += clamp(rsiDelta / 3, -0.15, 0.15);
+    }
+  }
+  rsiScore = clamp(rsiScore, -1, 1);
+
+  // ---- 3. 均线系统维度 ----
+  let maScore = 0;
+  // (a) 价格 vs 各均线
+  if (current > lastMA5) maScore += 0.1; else maScore -= 0.1;
+  if (current > lastMA20) maScore += 0.15; else maScore -= 0.15;
+  if (current > lastMA60) maScore += 0.2; else maScore -= 0.2;
+  if (lastMA120 != null) { if (current > lastMA120) maScore += 0.25; else maScore -= 0.25; }
+  // (b) 均线排列
+  if (lastMA5 > lastMA20 && lastMA20 > lastMA60) maScore += 0.3;
+  else if (lastMA5 < lastMA20 && lastMA20 < lastMA60) maScore -= 0.3;
+  // (c) MA5 与 MA20 的距离（趋势强度）
+  if (lastMA20 > 0) {
+    const maGap = (lastMA5 - lastMA20) / lastMA20;
+    maScore += clamp(maGap * 20, -0.15, 0.15);
+  }
+  maScore = clamp(maScore, -1, 1);
+
+  // ---- 4. 布林带维度 ----
+  let bbScore = 0;
+  if (lastBBL != null && lastBBU != null) {
+    const bbWidth = lastBBU - lastBBL;
+    if (bbWidth > 0) {
+      const bbPos = (current - lastBBL) / bbWidth; // 0=下轨, 1=上轨
+      bbScore += clamp((0.5 - bbPos) * 2, -1, 1); // 越低分越高
+    }
+    // 布林带收窄（波动率压缩，酝酿突破方向不明）
+    if (len > 25) {
+      const prevBBW = (bb.upper[len-6] || 0) - (bb.lower[len-6] || 0);
+      if (prevBBW > 0 && bbWidth < prevBBW * 0.7) {
+        // 布林带显著收窄 → 信号不确定性增加，轻微降权（乘以0.9）
+      }
+    }
+  }
+  bbScore = clamp(bbScore, -1, 1);
+
+  // ---- 5. 成交量维度 ----
+  let volScore = 0;
+  const avgVol20 = data.slice(-21, -1).reduce((s, d) => s + d.volume, 0) / 20;
+  const volRatio = data[len-1].volume / avgVol20;
+  const priceUp = current > data[len-2].close;
+  // (a) 放量上涨
+  if (volRatio > 1.5 && priceUp) volScore += 0.5;
+  else if (volRatio > 1.2 && priceUp) volScore += 0.25;
+  // (b) 放量下跌
+  else if (volRatio > 1.5 && !priceUp) volScore -= 0.5;
+  else if (volRatio > 1.2 && !priceUp) volScore -= 0.25;
+  // (c) 缩量上涨（健康）
+  else if (volRatio < 0.7 && priceUp) volScore += 0.15;
+  // (d) 缩量下跌
+  else if (volRatio < 0.7 && !priceUp) volScore -= 0.1;
+  // (e) 异常放量（无论方向，都是关注信号）
+  if (volRatio > 2.5 && priceUp) volScore = clamp(volScore + 0.1, -1, 1);
+  if (volRatio > 2.5 && !priceUp) volScore = clamp(volScore - 0.1, -1, 1);
+  volScore = clamp(volScore, -1, 1);
+
+  // ---- 6. 趋势强度辅助维度（用于动态权重，不直接参与评分）----
+  // 简化版：看 MACD 维度和均线维度的绝对值
+  const trendStrength = (Math.abs(macdScore) + Math.abs(maScore)) / 2; // 0~1
+
+  // ========================================
+  // 加权合成 + 动态权重
+  // ========================================
+  // 趋势强（>0.5）→ MACD↑ MA↑；趋势弱（<0.3）→ RSI↑ BB↑
+  let wMACD, wRSI, wMA, wBB, wVol;
+  if (trendStrength > 0.5) {
+    wMACD = 0.28; wMA = 0.25; wRSI = 0.17; wBB = 0.15; wVol = 0.15;
+  } else if (trendStrength < 0.3) {
+    wMACD = 0.18; wMA = 0.18; wRSI = 0.25; wBB = 0.22; wVol = 0.17;
+  } else {
+    // 中间线性插值
+    const t = (trendStrength - 0.3) / 0.2; // 0~1
+    wMACD = 0.18 + t * 0.10;
+    wMA = 0.18 + t * 0.07;
+    wRSI = 0.25 - t * 0.08;
+    wBB = 0.22 - t * 0.07;
+    wVol = 0.17 - t * 0.02;
+  }
+
+  const rawComposite = wMACD * macdScore + wRSI * rsiScore + wMA * maScore + wBB * bbScore + wVol * volScore;
+  const score = tanhMap(rawComposite, 0.55);
+
+  // ========================================
+  // 周期股策略 + 仓位计算
+  // ========================================
+  const isNewHigh = current >= histHigh;
+  const isAboveMA120 = lastMA120 != null && current > lastMA120;
+
+  // ATR 波动率系数：波动越大，仓位越保守
+  // 目标波动率 2%，当前 ATR% 偏离时调整
+  const targetATRPct = 0.02;
+  const volAdj = clamp(targetATRPct / Math.max(atrPct, 0.005), 0.5, 1.3);
+
+  // 基础仓位：score 连续映射
+  // score 3~97 → position 10~85
+  let basePosition = 10 + (score - 3) / 94 * 75;
+
+  // 应用波动率调整
+  let position = Math.round(basePosition * volAdj);
+
+  // ---- 硬性止损：跌破MA120较远时强制减仓 ----
+  let forceStop = false;
+  if (lastMA120 != null) {
+    const ma120Dist = (current - lastMA120) / lastMA120;
+    if (ma120Dist < -0.15) {
+      // 跌破年线15%+，强制大幅减仓
+      forceStop = true;
+      position = Math.min(position, 10);
+    } else if (ma120Dist < -0.10) {
+      // 跌破年线10%+，限制仓位上限
+      position = Math.min(position, 25);
+    }
+  }
+
+  // ---- 周期股底仓保护（仅未创新高 + 非硬止损时生效）----
+  if (!isNewHigh && !forceStop) {
+    if (isAboveMA120) {
+      position = Math.max(position, 30); // 在年线上方，最低保持30%
+    } else {
+      const ma120Dist = lastMA120 ? (current - lastMA120) / lastMA120 : 0;
+      if (ma120Dist > -0.08) {
+        position = Math.max(position, 20); // 跌破年线不远，最低20%
+      }
+      // 跌破年线较远时由硬止损规则接管，不做底仓保护
+    }
+  }
+
+  position = clamp(position, 0, 85);
+
+  // ---- 确定操作建议 ----
+  let action, signalType, strength;
+
+  if (forceStop) {
+    if (position <= 10) {
+      action = '跌破重要支撑，建议止损';
+      signalType = 'sell';
+      strength = '强';
+    } else {
+      action = '趋势转弱，大幅减仓';
+      signalType = 'sell';
+      strength = '强';
+    }
+  } else if (isNewHigh) {
+    // 突破历史新高 → 正常策略
+    if (position >= 70) { action = '买入'; signalType = 'buy'; strength = '强'; }
+    else if (position >= 55) { action = '持有'; signalType = 'hold'; strength = '中'; }
+    else if (position >= 40) { action = '减仓'; signalType = 'sell'; strength = '中'; }
+    else if (position >= 20) { action = '卖出'; signalType = 'sell'; strength = '强'; }
+    else { action = '清仓离场'; signalType = 'sell'; strength = '强'; }
+  } else {
+    // 未突破历史新高 → 上升通道策略
+    if (position >= 65) { action = '买入加仓'; signalType = 'buy'; strength = '强'; }
+    else if (position >= 55) { action = '逢低加仓'; signalType = 'buy'; strength = '中'; }
+    else if (position >= 45) { action = '持有观望'; signalType = 'hold'; strength = '弱'; }
+    else if (position >= 35) { action = '适度减仓'; signalType = 'hold'; strength = '弱'; }
+    else { action = '控制仓位'; signalType = 'hold'; strength = '中'; }
+  }
+
+  // ---- 趋势判断 ----
+  let trend;
+  if (current > lastMA60 && lastMA5 > lastMA20) trend = '上升趋势';
+  else if (current > lastMA60) trend = '震荡偏多';
+  else if (current > lastMA120) trend = '区间震荡';
+  else trend = '下降趋势';
+
+  // ---- 支撑/压力 ----
+  const support = Math.max(lastMA20 || 0, lastMA60 || 0, lastBBL || 0);
+  const resist = Math.min(lastBBU || 9999, histHigh);
+
+  return {
+    score, action, position, signalType, strength, trend,
+    support: support > 0 ? support : null,
+    resist,
+    current, histHigh, isNewHigh,
+    posIn52w, high52w, low52w,
+    atrPct, volAdj, forceStop,
+    weights: { wMACD: wMACD.toFixed(2), wRSI: wRSI.toFixed(2), wMA: wMA.toFixed(2), wBB: wBB.toFixed(2), wVol: wVol.toFixed(2) },
+    dimensionScores: { macd: macdScore, rsi: rsiScore, ma: maScore, bb: bbScore, vol: volScore },
+    indicators: {
+      macd: { dif: lastDif, dea: lastDea, hist: lastMACD, prevHist: prev(macd.macd) },
+      rsi: lastRSI,
+      bbPos: lastBBL && lastBBU ? ((current - lastBBL) / (lastBBU - lastBBL) * 100) : null,
+      ma120: lastMA120,
+    },
+    ma120: lastMA120,
+    data
+  };
+}
+
+// ============================================
+// 数据获取 - 新浪财经
+// ============================================
+// 新浪实时行情格式：
+// A股: var hq_str_sz002460="名称,今开,昨收,当前,最高,最低,买一,卖一,成交量,成交额,..."
+// 港股: var hq_str_rt_hk01772="英文,中文,昨收,开盘,最高,最低,涨跌额,涨幅,当前,..."
+
+async function fetchRealtime() {
+  try {
+    const text = await fetchText('/api/realtime?symbols=sz002460,rt_hk01772');
+    if (!text) return { sz: null, hk: null };
+    const result = { sz: null, hk: null };
+
+    // 解析A股
+    const szMatch = text.match(/hq_str_sz002460="([^"]*)"/);
+    if (szMatch) {
+      const p = szMatch[1].split(',');
+      result.sz = {
+        name: p[0],
+        open: parseFloat(p[1]),
+        prevClose: parseFloat(p[2]),
+        price: parseFloat(p[3]),
+        high: parseFloat(p[4]),
+        low: parseFloat(p[5]),
+        bid: parseFloat(p[6]),
+        ask: parseFloat(p[7]),
+        volume: parseFloat(p[8]),
+        amount: parseFloat(p[9]),
+      };
+    }
+
+    // 解析港股 (rt_hk01772)
+    // 格式: 英文名,中文名,昨收,开盘,最高,最低,当前价,涨跌额,涨幅%,买一价,卖一价,成交额,成交量,...
+    const hkMatch = text.match(/hq_str_rt_hk01772="([^"]*)"/);
+    if (hkMatch) {
+      const p = hkMatch[1].split(',');
+      result.hk = {
+        name: p[1],
+        prevClose: parseFloat(p[2]),
+        open: parseFloat(p[3]),
+        high: parseFloat(p[4]),
+        low: parseFloat(p[5]),
+        price: parseFloat(p[6]),     // 当前价 index 6
+        change: parseFloat(p[7]),
+        changePct: parseFloat(p[8]),
+        volume: parseFloat(p[12]),
+        amount: parseFloat(p[11]),
+      };
+    }
+    return result;
+  } catch(e) {
+    console.error('Realtime fetch error:', e);
+    return { sz: null, hk: null };
+  }
+}
+
+async function fetchKline(stock, period) {
+  try {
+    if (stock === 'sz') {
+      // A股用新浪K线: symbol sz002460, scale 240=日线 1200=周线
+      const scale = period === 'daily' ? '240' : '1200';
+      const text = await fetchText(`/api/kline?symbol=sz002460&scale=${scale}&ma=no&datalen=300`);
+      if (!text || text === 'null') return [];
+      const arr = JSON.parse(text);
+      return arr.map(item => ({
+        time: item.day,
+        open: parseFloat(item.open),
+        high: parseFloat(item.high),
+        low: parseFloat(item.low),
+        close: parseFloat(item.close),
+        volume: parseFloat(item.volume),
+      })).filter(d => d.close > 0);
+    } else {
+      // 港股用腾讯K线
+      const ktype = period === 'daily' ? 'day' : 'week';
+      const text = await fetchText(`/api/kline-tencent?symbol=hk01772&ktype=${ktype}`);
+      if (!text) return [];
+      const obj = JSON.parse(text);
+      const arr = obj.data && obj.data['hk01772'] && obj.data['hk01772'][ktype];
+      if (!arr || !Array.isArray(arr)) return [];
+      return arr.map(item => ({
+        time: item[0],
+        open: parseFloat(item[1]),
+        close: parseFloat(item[2]),
+        high: parseFloat(item[3]),
+        low: parseFloat(item[4]),
+        volume: parseFloat(item[5]),
+      })).filter(d => d.close > 0);
+    }
+  } catch(e) {
+    console.error('Kline fetch error:', e);
+    return [];
+  }
+}
+
+// ============================================
+// 界面更新
+// ============================================
+function updateRealtimeCard(stock, d) {
+  if (!d) return;
+  const prefix = stock === 'sz' ? 'SZ' : 'HK';
+  // 开盘前当前价为0时，使用昨收价作为显示价格
+  const p = (d.price > 0) ? d.price : d.prevClose;
+  const prevClose = d.prevClose;
+  const change = (d.price > 0) ? (p - prevClose) : 0;
+  const changePct = prevClose > 0 ? (change / prevClose * 100) : 0;
+  const cls = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+  const isPreMarket = d.price <= 0;
+
+  document.getElementById('price' + prefix).textContent = fmt(p);
+  document.getElementById('price' + prefix).className = 'stock-price ' + cls;
+  const changeStr = isPreMarket ? '盘前' : ((change >= 0 ? '+' : '') + fmt(change) + '  ' + (changePct >= 0 ? '+' : '') + fmt(changePct) + '%');
+  document.getElementById('change' + prefix).textContent = changeStr;
+  document.getElementById('change' + prefix).className = 'stock-change ' + cls;
+
+  document.getElementById('open' + prefix).textContent = isPreMarket ? '--' : fmt(d.open);
+  document.getElementById('high' + prefix).textContent = isPreMarket ? '--' : fmt(d.high);
+  document.getElementById('low' + prefix).textContent = isPreMarket ? '--' : fmt(d.low);
+  document.getElementById('vol' + prefix).textContent = fmtVol(d.volume);
+  document.getElementById('amt' + prefix).textContent = fmtAmt(d.amount);
+  document.getElementById('turn' + prefix).textContent = '--';
+}
+
+function updateChart(data) {
+  const chartContainer = document.getElementById('mainChart');
+  if (!STATE.chart) {
+    STATE.chart = LightweightCharts.createChart(chartContainer, {
+      width: chartContainer.clientWidth,
+      height: chartContainer.clientHeight,
+      layout: {
+        background: { type: 'solid', color: '#0a0e17' },
+        textColor: '#94a3b8',
+        fontSize: 12,
+      },
+      grid: {
+        vertLines: { color: '#1a1f2e' },
+        horzLines: { color: '#1a1f2e' },
+      },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: {
+        borderColor: '#2a3148',
+        scaleMargins: { top: 0.1, bottom: 0.25 },
+      },
+      timeScale: {
+        borderColor: '#2a3148',
+        timeVisible: STATE.period === 'daily',
+        secondsVisible: false,
+      },
+    });
+
+    STATE.candleSeries = STATE.chart.addCandlestickSeries({
+      upColor: '#10b981',
+      downColor: '#ef4444',
+      borderUpColor: '#10b981',
+      borderDownColor: '#ef4444',
+      wickUpColor: '#10b981',
+      wickDownColor: '#ef4444',
+    });
+
+    STATE.volumeSeries = STATE.chart.addHistogramSeries({
+      color: '#3b82f6',
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+    });
+    STATE.chart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+    });
+
+    // 均线
+    const maColors = { ma5: '#f59e0b', ma10: '#8b5cf6', ma20: '#06b6d4', ma60: '#ef4444', ma120: '#10b981' };
+    for (const [key, color] of Object.entries(maColors)) {
+      STATE.maLines[key] = STATE.chart.addLineSeries({
+        color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+      });
+    }
+
+    // 布林带
+    STATE.bbUpper = STATE.chart.addLineSeries({
+      color: 'rgba(139,92,246,0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
+    });
+    STATE.bbLower = STATE.chart.addLineSeries({
+      color: 'rgba(139,92,246,0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
+    });
+
+    // resize
+    new ResizeObserver(() => {
+      STATE.chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight });
+    }).observe(chartContainer);
+  }
+
+  const candleData = data.map(d => ({ time: d.time, open: d.open, high: d.high, low: d.low, close: d.close }));
+  const volData = data.map(d => ({
+    time: d.time,
+    value: d.volume,
+    color: d.close >= d.open ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)',
+  }));
+
+  STATE.candleSeries.setData(candleData);
+  STATE.volumeSeries.setData(volData);
+
+  // 均线
+  const ma5 = calcMA(data, 5);
+  const ma10 = calcMA(data, 10);
+  const ma20 = calcMA(data, 20);
+  const ma60 = calcMA(data, 60);
+  const ma120 = calcMA(data, 120);
+
+  const toLine = (arr) => arr.map((v, i) => v != null ? { time: data[i].time, value: v } : null).filter(Boolean);
+  STATE.maLines.ma5.setData(toLine(ma5));
+  STATE.maLines.ma10.setData(toLine(ma10));
+  STATE.maLines.ma20.setData(toLine(ma20));
+  STATE.maLines.ma60.setData(toLine(ma60));
+  STATE.maLines.ma120.setData(toLine(ma120));
+
+  // 布林带
+  const bb = calcBollinger(data);
+  STATE.bbUpper.setData(toLine(bb.upper));
+  STATE.bbLower.setData(toLine(bb.lower));
+
+  STATE.chart.timeScale().fitContent();
+
+  // 数据范围
+  if (data.length > 0) {
+    document.getElementById('dataRange').textContent = data[0].time + ' 至 ' + data[data.length-1].time;
+  }
+}
+
+function updateIndicators(signal) {
+  if (!signal) return;
+  const { indicators } = signal;
+  const macd = indicators.macd;
+  const cls = macd.hist > 0 ? 'up' : 'down';
+
+  // MACD
+  document.getElementById('macdValue').textContent = fmt(macd.hist, 4);
+  document.getElementById('macdValue').className = 'ind-value ' + cls;
+  const macdDir = macd.hist > macd.prevHist ? '↑ 柱体放大' : macd.hist < macd.prevHist ? '↓ 柱体缩小' : '— 无变化';
+  const macdSignal = macd.dif > macd.dea ? '金叉状态' : '死叉状态';
+  document.getElementById('macdSub').textContent = `${macdSignal} · ${macdDir}`;
+
+  // MACD mini bars (last 20)
+  const macdCalc = calcMACD(signal.data);
+  const macdLast20 = macdCalc.macd.slice(-20);
+  const barsHtml = macdLast20.map(v => {
+    const h = Math.min(Math.abs(v) / (Math.max(...macdLast20.map(Math.abs)) || 1) * 40, 40);
+    const color = v >= 0 ? 'var(--green)' : 'var(--red)';
+    return `<div class="macd-bar" style="height:${Math.max(h,2)}px;background:${color}"></div>`;
+  }).join('');
+  document.getElementById('macdBars').innerHTML = barsHtml;
+
+  // RSI
+  const rsi = indicators.rsi;
+  if (rsi != null) {
+    document.getElementById('rsiValue').textContent = fmt(rsi, 1);
+    const rsiColor = rsi < 35 ? 'var(--green)' : rsi > 65 ? 'var(--red)' : 'var(--yellow)';
+    document.getElementById('rsiValue').style.color = rsiColor;
+    let rsiStatus = '中性';
+    if (rsi < 20) rsiStatus = '极度超卖';
+    else if (rsi < 35) rsiStatus = '超卖区域';
+    else if (rsi > 80) rsiStatus = '极度超买';
+    else if (rsi > 65) rsiStatus = '超买区域';
+    document.getElementById('rsiSub').textContent = rsiStatus + ' (周期股放宽阈值: 20/80)';
+    document.getElementById('rsiBar').style.width = rsi + '%';
+    document.getElementById('rsiBar').style.background = rsiColor;
+  }
+
+  // 布林带
+  if (indicators.bbPos != null) {
+    document.getElementById('bbValue').textContent = fmt(indicators.bbPos, 1) + '%';
+    const bbPos = indicators.bbPos;
+    let bbStatus = '中轨附近';
+    if (bbPos < 20) bbStatus = '接近下轨';
+    else if (bbPos > 80) bbStatus = '接近上轨';
+    document.getElementById('bbSub').textContent = bbStatus;
+    document.getElementById('bbBar').style.width = bbPos + '%';
+    document.getElementById('bbBar').style.background = bbPos < 30 ? 'var(--green)' : bbPos > 70 ? 'var(--red)' : 'var(--cyan)';
+  }
+
+  // 综合评分
+  const score = signal.score;
+  document.getElementById('scoreValue').textContent = score;
+  const scoreColor = score > 65 ? 'var(--green)' : score < 35 ? 'var(--red)' : 'var(--yellow)';
+  document.getElementById('scoreValue').style.color = scoreColor;
+  let scoreLabel = '中性';
+  if (score > 80) scoreLabel = '强烈看多';
+  else if (score > 65) scoreLabel = '偏多';
+  else if (score > 50) scoreLabel = '中性偏多';
+  else if (score > 45) scoreLabel = '中性偏空';
+  else if (score > 30) scoreLabel = '偏空';
+  else scoreLabel = '强烈看空';
+
+  // 动态权重信息
+  const w = signal.weights;
+  const ds = signal.dimensionScores;
+  const dimStr = `M:${(macd.dif[len-1]>macd.dea[len-1]?'金':'死')} RSI:${signal.indicators.rsi!=null?Math.round(signal.indicators.rsi):'--'}`;
+  const wStr = `MACD${w.wMACD} RSI${w.wRSI} MA${w.wMA} BB${w.wBB} VOL${w.wVol}`;
+  document.getElementById('scoreSub').textContent = scoreLabel + '  权重[' + wStr + ']';
+  document.getElementById('scoreBar').style.width = score + '%';
+  document.getElementById('scoreBar').style.background = scoreColor;
+}
+
+function updateSignalPanel(signal) {
+  if (!signal) return;
+
+  const badge = document.getElementById('signalBadge');
+  const badgeText = { buy: '买入信号', sell: '卖出信号', hold: '观望信号' };
+  const badgeCls = { buy: 'signal-buy', sell: 'signal-sell', hold: 'signal-hold' };
+  badge.textContent = badgeText[signal.signalType] + ' · ' + signal.strength;
+  badge.className = 'signal-badge ' + badgeCls[signal.signalType];
+
+  document.getElementById('sigAction').textContent = signal.action;
+  document.getElementById('sigAction').style.color = signal.signalType === 'buy' ? 'var(--green)' : signal.signalType === 'sell' ? 'var(--red)' : 'var(--yellow)';
+
+  document.getElementById('sigPosition').textContent = signal.position + '%';
+  document.getElementById('sigStrength').textContent = signal.strength;
+
+  document.getElementById('sigTrend').textContent = signal.trend;
+  document.getElementById('sigTrend').style.color = signal.trend.includes('上升') ? 'var(--green)' : signal.trend.includes('下降') ? 'var(--red)' : 'var(--yellow)';
+
+  document.getElementById('sigSupport').textContent = fmt(signal.support);
+  document.getElementById('sigResist').textContent = fmt(signal.resist);
+
+  const posFill = document.getElementById('posFill');
+  posFill.style.width = signal.position + '%';
+  posFill.textContent = signal.position + '%';
+  posFill.style.background = signal.position > 60 ? 'linear-gradient(90deg,var(--green),var(--cyan))' :
+                              signal.position > 40 ? 'linear-gradient(90deg,var(--yellow),var(--green))' :
+                              'linear-gradient(90deg,var(--red),var(--yellow))';
+}
+
+// ============================================
+// 控制
+// ============================================
+function switchStock() {
+  STATE.currentStock = document.getElementById('stockSelect').value;
+  document.getElementById('chartTitle').textContent =
+    '赣锋锂业 ' + (STATE.currentStock === 'sz' ? '002460.SZ' : '01772.HK') +
+    ' · ' + (STATE.period === 'daily' ? '日线' : '周线');
+  loadKline();
+}
+
+function setPeriod(p) {
+  STATE.period = p;
+  document.getElementById('btnDaily').className = 'btn' + (p === 'daily' ? ' active' : '');
+  document.getElementById('btnWeekly').className = 'btn' + (p === 'weekly' ? ' active' : '');
+  document.getElementById('chartTitle').textContent =
+    '赣锋锂业 ' + (STATE.currentStock === 'sz' ? '002460.SZ' : '01772.HK') +
+    ' · ' + (p === 'daily' ? '日线' : '周线');
+  loadKline();
+}
+
+function setRefreshInterval() {
+  STATE.refreshInterval = parseInt(document.getElementById('intervalSelect').value);
+  STATE.refreshCountdown = STATE.refreshInterval;
+}
+
+// ============================================
+// 主流程
+// ============================================
+async function loadRealtime() {
+  const data = await fetchRealtime();
+  updateRealtimeCard('sz', data.sz);
+  updateRealtimeCard('hk', data.hk);
+}
+
+async function loadKline() {
+  const data = await fetchKline(STATE.currentStock, STATE.period);
+  if (!data || data.length === 0) {
+    showToast('K线数据加载失败，请检查网络', 'error');
+    return;
+  }
+  STATE.klineData = data;
+  updateChart(data);
+  const signal = generateSignal(data);
+  updateIndicators(signal);
+  updateSignalPanel(signal);
+}
+
+async function init() {
+  try {
+    await loadRealtime();
+    console.log('Realtime data loaded OK');
+    await loadKline();
+    console.log('Kline data loaded OK, items:', STATE.klineData.length);
+    document.getElementById('loadingOverlay').classList.add('hidden');
+    showToast('数据加载成功');
+  } catch(e) {
+    console.error('Init error:', e);
+    document.getElementById('loadingOverlay').classList.add('hidden');
+    showToast('数据加载失败: ' + e.message, 'error');
+  }
+}
+
+// 自动刷新
+setInterval(() => {
+  STATE.refreshCountdown--;
+  document.getElementById('refreshTimer').textContent = STATE.refreshCountdown + 's 后刷新';
+  if (STATE.refreshCountdown <= 0) {
+    STATE.refreshCountdown = STATE.refreshInterval;
+    loadRealtime();
+    loadKline();
+  }
+}, 1000);
+
+init();
+</script>
+</body>
+</html>
