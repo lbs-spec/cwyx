@@ -320,7 +320,7 @@ body {
       <div class="ind-bar"><div class="ind-bar-fill" id="bbBar" style="width:0;background:var(--cyan)"></div></div>
     </div>
     <div class="ind-card">
-      <div class="ind-label">综合评分 · 去饱和映射</div>
+      <div class="ind-label">综合评分</div>
       <div class="ind-value" id="scoreValue">--</div>
       <div class="ind-sub" id="scoreSub">--</div>
       <div class="ind-bar"><div class="ind-bar-fill" id="scoreBar" style="width:0;background:var(--accent)"></div></div>
@@ -1093,9 +1093,6 @@ function updateIndicators(signal) {
   else scoreLabel = '强烈看空';
 
   // 动态权重信息
-  const w = signal.weights;
-  const ds = signal.dimensionScores;
-  const dimStr = `M:${(macd.dif[len-1]>macd.dea[len-1]?'金':'死')} RSI:${signal.indicators.rsi!=null?Math.round(signal.indicators.rsi):'--'}`;
   const wStr = `MACD${w.wMACD} RSI${w.wRSI} MA${w.wMA} BB${w.wBB} VOL${w.wVol}`;
   document.getElementById('scoreSub').textContent = scoreLabel + '  权重[' + wStr + ']';
   document.getElementById('scoreBar').style.width = score + '%';
