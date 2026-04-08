@@ -571,12 +571,33 @@ function generateSignal(data) {
   if (prevDif >= prevDea && lastDif < lastDea) macdScore -= 0.3;
   macdScore = clamp(macdScore, -1, 1);
 
-  // ---- 2. RSI 维度（周期股放宽阈值 20/80）+ 背离检测 ----
+  // ---- 2. RSI 维度（趋势感知：强势中不惩罚超买）----
   let rsiScore = 0;
   let rsiDivBonus = 0;
   if (lastRSI != null) {
-    const rsiMid = 50;
-    rsiScore += clamp((rsiMid - lastRSI) / 30, -1, 1);
+    // 先算初步趋势强度（基于 MACD 方向和均线位置）
+    const prelimBullish = (lastDif > lastDea) && (current > lastMA20);
+    const prelimStrong = prelimBullish && (lastMA5 > lastMA20 && lastMA20 > lastMA60);
+
+    if (prelimStrong) {
+      // 强势趋势模式：RSI 高位 = 动量确认，不惩罚
+      if (lastRSI < 30) rsiScore += 0.6;          // 极度超卖，强买
+      else if (lastRSI < 40) rsiScore += 0.3;       // 偏低，买入区
+      else if (lastRSI < 55) rsiScore += 0.1;        // 中性偏多
+      else if (lastRSI < 70) rsiScore = 0;           // 健康动量，中性
+      else if (lastRSI < 80) rsiScore -= 0.15;        // 偏高但可接受
+      else rsiScore -= 0.4;                           // 极端超买才减分
+    } else if (prelimBullish) {
+      // 一般多头：适度放宽阈值
+      const rsiMid = 55;
+      rsiScore += clamp((rsiMid - lastRSI) / 35, -1, 1);
+    } else {
+      // 震荡/空头：标准均值回归逻辑
+      const rsiMid = 50;
+      rsiScore += clamp((rsiMid - lastRSI) / 30, -1, 1);
+    }
+
+    // 连续超卖/超买天数（保留原有逻辑）
     let rsiLowDays = 0, rsiHighDays = 0;
     for (let i = len - 1; i >= 0 && rsi[i] != null && i > len - 10; i--) {
       if (rsi[i] < 30) rsiLowDays++; else break;
@@ -592,15 +613,14 @@ function generateSignal(data) {
       rsiScore += clamp(rsiDelta / 3, -0.15, 0.15);
     }
 
-    // 【新增】RSI 背离检测（回看 20~60 根 K 线）
+    // RSI 背离检测
     const divLookback = Math.min(60, len - 5);
     if (divLookback >= 10) {
-      let recentPriceLow = Infinity, recentPriceIdx = -1;
-      let recentPriceHigh = -Infinity, recentPriceHighIdx = -1;
+      let recentPriceLow = Infinity, recentPriceHigh = -Infinity;
       let recentRSILow = Infinity, recentRSIHigh = -Infinity;
       for (let i = len - 1; i >= len - divLookback && i >= 0; i--) {
-        if (data[i].close < recentPriceLow) { recentPriceLow = data[i].close; recentPriceIdx = i; }
-        if (data[i].close > recentPriceHigh) { recentPriceHigh = data[i].close; recentPriceHighIdx = i; }
+        if (data[i].close < recentPriceLow) recentPriceLow = data[i].close;
+        if (data[i].close > recentPriceHigh) recentPriceHigh = data[i].close;
         if (rsi[i] != null && rsi[i] < recentRSILow) recentRSILow = rsi[i];
         if (rsi[i] != null && rsi[i] > recentRSIHigh) recentRSIHigh = rsi[i];
       }
@@ -613,11 +633,9 @@ function generateSignal(data) {
         if (rsi[i] != null && rsi[i] < baseRSILow) baseRSILow = rsi[i];
         if (rsi[i] != null && rsi[i] > baseRSIHigh) baseRSIHigh = rsi[i];
       }
-      // 底背离：近期价格新低但 RSI 不创新低
       if (recentPriceLow < basePriceLow * 0.97 && recentRSILow > baseRSILow * 1.05) {
         rsiDivBonus += 0.25;
       }
-      // 顶背离：近期价格新高但 RSI 不创新高
       if (recentPriceHigh > basePriceHigh * 1.03 && recentRSIHigh < baseRSIHigh * 0.95) {
         rsiDivBonus -= 0.25;
       }
@@ -639,13 +657,25 @@ function generateSignal(data) {
   }
   maScore = clamp(maScore, -1, 1);
 
-  // ---- 4. 布林带维度 ----
+  // ---- 4. 布林带维度（趋势感知：强势中沿上轨运行=健康）----
   let bbScore = 0;
   if (lastBBL != null && lastBBU != null) {
     const bbWidth = lastBBU - lastBBL;
     if (bbWidth > 0) {
       const bbPos = (current - lastBBL) / bbWidth;
-      bbScore += clamp((0.5 - bbPos) * 2, -1, 1);
+      // 趋势感知布林带
+      const isStrongTrend = (lastDif > lastDea) && (lastMA5 > lastMA20 && lastMA20 > lastMA60);
+      if (isStrongTrend) {
+        // 强势趋势：沿上轨运行是正常现象，不惩罚
+        if (bbPos > 0.85) bbScore -= 0.15;       // 极端高位才轻微减分
+        else if (bbPos > 0.7) bbScore = 0;        // 偏高但健康
+        else if (bbPos > 0.3) bbScore += 0.1;     // 中位偏上，良好
+        else if (bbPos > 0.15) bbScore -= 0.1;     // 偏弱
+        else bbScore -= 0.3;                        // 接近下轨，弱势
+      } else {
+        // 非强趋势：标准均值回归
+        bbScore += clamp((0.5 - bbPos) * 2, -1, 1);
+      }
     }
   }
   bbScore = clamp(bbScore, -1, 1);
@@ -669,14 +699,25 @@ function generateSignal(data) {
   if (volRatio > 4.0 && !priceUp) volScore = clamp(volScore - 0.15, -1, 1);
   volScore = clamp(volScore, -1, 1);
 
-  // ---- 6. 52周位置维度（新增）----
+  // ---- 6. 52周位置维度（趋势感知：强势创新高过程=正常）----
   let pos52Score = 0;
-  if (posIn52w < 0.15) pos52Score += 0.35;
-  else if (posIn52w < 0.25) pos52Score += 0.2;
-  else if (posIn52w < 0.4) pos52Score += 0.05;
-  else if (posIn52w > 0.85) pos52Score -= 0.35;
-  else if (posIn52w > 0.75) pos52Score -= 0.2;
-  else if (posIn52w > 0.6) pos52Score -= 0.05;
+  const isStrongTrend = (lastDif > lastDea) && (lastMA5 > lastMA20 && lastMA20 > lastMA60);
+  if (isStrongTrend) {
+    // 强势趋势中，从低位回升到高位是主升浪正常表现
+    if (posIn52w < 0.2) pos52Score += 0.3;        // 起涨区
+    else if (posIn52w < 0.5) pos52Score += 0.15;   // 中位上升
+    else if (posIn52w < 0.8) pos52Score = 0;       // 高位运行，中性
+    else if (posIn52w < 0.95) pos52Score -= 0.1;    // 接近极高
+    else pos52Score -= 0.25;                         // 极端高位才减分
+  } else {
+    // 非强趋势：标准逻辑（高位更危险）
+    if (posIn52w < 0.15) pos52Score += 0.35;
+    else if (posIn52w < 0.25) pos52Score += 0.2;
+    else if (posIn52w < 0.4) pos52Score += 0.05;
+    else if (posIn52w > 0.85) pos52Score -= 0.35;
+    else if (posIn52w > 0.75) pos52Score -= 0.2;
+    else if (posIn52w > 0.6) pos52Score -= 0.05;
+  }
   pos52Score = clamp(pos52Score, -1, 1);
 
   // ---- 趋势强度 ----
@@ -736,17 +777,20 @@ function generateSignal(data) {
     }
   }
 
-  // 周期股底仓保护
+  // 周期股底仓保护（核心规则：未创新高前至少保留30%）
   if (!isNewHigh && !forceStop) {
+    // 未达历史新高：永远保留至少30%底仓，确保吃到主升浪
+    position = Math.max(position, 30);
     if (isAboveMA120) {
-      position = Math.max(position, 30);
+      position = Math.max(position, 35);   // 年线上方，最低35%
     } else {
       const ma120Dist = lastMA120 ? (current - lastMA120) / lastMA120 : 0;
       if (ma120Dist > -0.06) {
-        position = Math.max(position, 20);
+        position = Math.max(position, 25); // 跌破年线不远，25%
       }
     }
   }
+  // 已创新高后：允许全部清仓（不设底仓保护）
 
   position = clamp(position, 0, 85);
 
@@ -1076,9 +1120,7 @@ function updateIndicators(signal) {
   else if (score > 30) scoreLabel = '偏空';
   else scoreLabel = '强烈看空';
 
-  const w = signal.weights;
-  const wStr = `MACD${w.wMACD} RSI${w.wRSI} MA${w.wMA} BB${w.wBB} VOL${w.wVol} 52W${w.w52w}`;
-  document.getElementById('scoreSub').textContent = scoreLabel + '  权重[' + wStr + ']';
+  document.getElementById('scoreSub').textContent = scoreLabel;
   document.getElementById('scoreBar').style.width = score + '%';
   document.getElementById('scoreBar').style.background = scoreColor;
 }
