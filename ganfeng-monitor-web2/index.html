@@ -522,7 +522,7 @@ function calcATR(data, period = 14) {
 //   7. 硬性止损：跌破 MA120 较大幅度时强制减仓
 //
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function tanhMap(raw, k = 0.55) {
+function tanhMap(raw, k = 1.2) {
   // raw ∈ ℝ → [3, 97]，k 越小越早饱和
   return Math.round(50 * (1 + Math.tanh(raw / k)) / 2 + 3);
 }
@@ -757,16 +757,16 @@ function generateSignal(data) {
   } else if (isNewHigh) {
     // 突破历史新高 → 正常策略
     if (position >= 70) { action = '买入'; signalType = 'buy'; strength = '强'; }
-    else if (position >= 55) { action = '持有'; signalType = 'hold'; strength = '中'; }
-    else if (position >= 40) { action = '减仓'; signalType = 'sell'; strength = '中'; }
+    else if (position >= 52) { action = '持有'; signalType = 'hold'; strength = '中'; }
+    else if (position >= 38) { action = '减仓'; signalType = 'sell'; strength = '中'; }
     else if (position >= 20) { action = '卖出'; signalType = 'sell'; strength = '强'; }
     else { action = '清仓离场'; signalType = 'sell'; strength = '强'; }
   } else {
     // 未突破历史新高 → 上升通道策略
-    if (position >= 65) { action = '买入加仓'; signalType = 'buy'; strength = '强'; }
-    else if (position >= 55) { action = '逢低加仓'; signalType = 'buy'; strength = '中'; }
-    else if (position >= 45) { action = '持有观望'; signalType = 'hold'; strength = '弱'; }
-    else if (position >= 35) { action = '适度减仓'; signalType = 'hold'; strength = '弱'; }
+    if (position >= 62) { action = '买入加仓'; signalType = 'buy'; strength = '强'; }
+    else if (position >= 52) { action = '逢低加仓'; signalType = 'buy'; strength = '中'; }
+    else if (position >= 42) { action = '持有观望'; signalType = 'hold'; strength = '弱'; }
+    else if (position >= 32) { action = '适度减仓'; signalType = 'hold'; strength = '弱'; }
     else { action = '控制仓位'; signalType = 'hold'; strength = '中'; }
   }
 
