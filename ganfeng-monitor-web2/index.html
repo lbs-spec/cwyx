@@ -1093,6 +1093,7 @@ function updateIndicators(signal) {
   else scoreLabel = '强烈看空';
 
   // 动态权重信息
+  const w = signal.weights;
   const wStr = `MACD${w.wMACD} RSI${w.wRSI} MA${w.wMA} BB${w.wBB} VOL${w.wVol}`;
   document.getElementById('scoreSub').textContent = scoreLabel + '  权重[' + wStr + ']';
   document.getElementById('scoreBar').style.width = score + '%';
