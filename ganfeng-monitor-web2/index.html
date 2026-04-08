@@ -37,9 +37,7 @@ body {
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
   border-bottom: 1px solid var(--border);
   padding: 12px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   position: sticky; top: 0; z-index: 100;
 }
 .header h1 {
@@ -356,11 +354,11 @@ body {
 // 全局状态
 // ============================================
 const STATE = {
-  currentStock: 'sz',  // 'sz' or 'hk'
-  period: 'daily',     // 'daily' or 'weekly'
+  currentStock: 'sz',
+  period: 'daily',
   refreshInterval: 30,
-  klineData: [],       // {time, open, high, low, close, volume}
-  historyHigh: { sz: 158.12, hk: 129.76 },  // 前复权历史最高价（突破后恢复正常策略，允许清仓）
+  klineData: [],
+  historyHigh: { sz: 158.12, hk: 129.76 },
   chart: null,
   candleSeries: null,
   volumeSeries: null,
@@ -370,12 +368,6 @@ const STATE = {
   markers: [],
   refreshCountdown: 30,
 };
-
-// ============================================
-// 新浪财经数据源配置（通过本地代理）
-// ============================================
-// A股: sz002460  港股: rt_hk01772
-// K线 scale: 240=日线, 1200=周线
 
 // ============================================
 // 工具函数
@@ -487,7 +479,6 @@ function calcBollinger(data, period = 20, mult = 2.5) {
 }
 
 function calcATR(data, period = 14) {
-  // Average True Range
   const tr = [];
   for (let i = 1; i < data.length; i++) {
     const high = data[i].high;
@@ -496,7 +487,6 @@ function calcATR(data, period = 14) {
     tr.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
   }
   if (tr.length < period) return tr;
-  // 简单移动平均
   const result = [];
   for (let i = 0; i < period - 1; i++) result.push(tr[i]);
   let sum = tr.slice(0, period).reduce((a, b) => a + b, 0);
@@ -509,21 +499,19 @@ function calcATR(data, period = 14) {
 }
 
 // ============================================
-// 综合评分与信号生成（v2 — 去饱和 + 子维度归一化）
+// 综合评分与信号生成（v3 — 背离检测 + 52周位置 + 更严格突破确认）
 // ============================================
 //
-// 架构：
-//   1. 每个维度产出 [-1, +1] 的归一化分数
-//   2. 加权合成 raw composite ∈ 大约 [-1.2, +1.2]
-//   3. tanh 映射到 [3, 97]，永远不贴死 0/100
-//   4. 动态权重：趋势强→MACD权重↑；趋势弱→RSI/布林带权重↑
-//   5. ATR 波动率适配：高波动自动降低仓位上限
-//   6. 动态历史高点：从K线计算，fallback 到手动设定
-//   7. 硬性止损：跌破 MA120 较大幅度时强制减仓
+// v3 改进：
+//   1. RSI 背离检测：底背离加分 / 顶背离减分
+//   2. 52周位置参与评分：低位加分 / 高位减分
+//   3. 历史新高判断：突破 2% + 放量确认
+//   4. ATR 波动率下限收紧：高波动时仓位更低
+//   5. 异常放量权重提升：天量更重视
+//   6. 硬性止损收紧：12%/8% 两档
 //
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function tanhMap(raw, k = 1.2) {
-  // raw ∈ ℝ → [3, 97]，k 越小越早饱和
   return Math.round(50 * (1 + Math.tanh(raw / k)) / 2 + 3);
 }
 
@@ -552,9 +540,9 @@ function generateSignal(data) {
   const lastBBU = last(bb.upper), lastBBL = last(bb.lower), lastBBM = last(bb.mid);
   const lastMA5 = last(ma5), lastMA20 = last(ma20), lastMA60 = last(ma60), lastMA120 = last(ma120);
   const lastATR = atrArr.length > 0 ? last(atrArr) : null;
-  const atrPct = lastATR ? lastATR / current : 0.03; // 默认3%
+  const atrPct = lastATR ? lastATR / current : 0.03;
 
-  // ---- 动态历史高点：取K线内最高价 vs 手动设定，取大者 ----
+  // ---- 动态历史高点 ----
   const klineHigh = Math.max(...data.map(d => d.high));
   const histHigh = Math.max(STATE.historyHigh[STATE.currentStock] || 0, klineHigh);
 
@@ -572,29 +560,23 @@ function generateSignal(data) {
 
   // ---- 1. MACD 维度 ----
   let macdScore = 0;
-  // (a) 金叉/死叉方向
   macdScore += (lastDif > lastDea) ? 0.3 : -0.3;
-  // (b) 零轴位置
   macdScore += (lastDif > 0) ? 0.15 : -0.15;
-  // (c) 柱体趋势
   if (lastMACD > 0) macdScore += (lastMACD > prev(macd.macd)) ? 0.15 : -0.05;
   else macdScore += (lastMACD < prev(macd.macd)) ? -0.15 : 0.05;
-  // (d) DIF斜率（3日变化）
   const difSlope3 = len > 4 ? (lastDif - macd.dif[len-4]) / 3 : 0;
   const difRef = Math.max(Math.abs(lastDif) * 0.05, 0.01);
   macdScore += clamp(difSlope3 / difRef, -0.3, 0.3);
-  // (e) 金叉/死叉事件
   if (prevDif <= prevDea && lastDif > lastDea) macdScore += 0.3;
   if (prevDif >= prevDea && lastDif < lastDea) macdScore -= 0.3;
   macdScore = clamp(macdScore, -1, 1);
 
-  // ---- 2. RSI 维度（周期股放宽阈值 20/80）----
+  // ---- 2. RSI 维度（周期股放宽阈值 20/80）+ 背离检测 ----
   let rsiScore = 0;
+  let rsiDivBonus = 0;
   if (lastRSI != null) {
-    // (a) 当前位置映射
     const rsiMid = 50;
-    rsiScore += clamp((rsiMid - lastRSI) / 30, -1, 1); // RSI越低分数越高
-    // (b) 连续超卖/超买天数
+    rsiScore += clamp((rsiMid - lastRSI) / 30, -1, 1);
     let rsiLowDays = 0, rsiHighDays = 0;
     for (let i = len - 1; i >= 0 && rsi[i] != null && i > len - 10; i--) {
       if (rsi[i] < 30) rsiLowDays++; else break;
@@ -603,27 +585,54 @@ function generateSignal(data) {
       if (rsi[i] > 70) rsiHighDays++; else break;
     }
     const persistBonus = Math.min(Math.max(rsiLowDays, rsiHighDays) / 5, 1.0);
-    if (rsiLowDays > 0) rsiScore += 0.2 * persistBonus; // 超卖越久越该买
-    if (rsiHighDays > 0) rsiScore -= 0.2 * persistBonus; // 超买越久越该卖
-    // (c) RSI变化方向
+    if (rsiLowDays > 0) rsiScore += 0.2 * persistBonus;
+    if (rsiHighDays > 0) rsiScore -= 0.2 * persistBonus;
     if (len > 2 && rsi[len-2] != null) {
       const rsiDelta = lastRSI - rsi[len-2];
       rsiScore += clamp(rsiDelta / 3, -0.15, 0.15);
+    }
+
+    // 【新增】RSI 背离检测（回看 20~60 根 K 线）
+    const divLookback = Math.min(60, len - 5);
+    if (divLookback >= 10) {
+      let recentPriceLow = Infinity, recentPriceIdx = -1;
+      let recentPriceHigh = -Infinity, recentPriceHighIdx = -1;
+      let recentRSILow = Infinity, recentRSIHigh = -Infinity;
+      for (let i = len - 1; i >= len - divLookback && i >= 0; i--) {
+        if (data[i].close < recentPriceLow) { recentPriceLow = data[i].close; recentPriceIdx = i; }
+        if (data[i].close > recentPriceHigh) { recentPriceHigh = data[i].close; recentPriceHighIdx = i; }
+        if (rsi[i] != null && rsi[i] < recentRSILow) recentRSILow = rsi[i];
+        if (rsi[i] != null && rsi[i] > recentRSIHigh) recentRSIHigh = rsi[i];
+      }
+      const baseStart = Math.max(0, len - divLookback - 40);
+      let basePriceLow = Infinity, baseRSILow = Infinity;
+      let basePriceHigh = -Infinity, baseRSIHigh = -Infinity;
+      for (let i = len - divLookback - 1; i >= baseStart && i >= 0; i--) {
+        if (data[i].close < basePriceLow) basePriceLow = data[i].close;
+        if (data[i].close > basePriceHigh) basePriceHigh = data[i].close;
+        if (rsi[i] != null && rsi[i] < baseRSILow) baseRSILow = rsi[i];
+        if (rsi[i] != null && rsi[i] > baseRSIHigh) baseRSIHigh = rsi[i];
+      }
+      // 底背离：近期价格新低但 RSI 不创新低
+      if (recentPriceLow < basePriceLow * 0.97 && recentRSILow > baseRSILow * 1.05) {
+        rsiDivBonus += 0.25;
+      }
+      // 顶背离：近期价格新高但 RSI 不创新高
+      if (recentPriceHigh > basePriceHigh * 1.03 && recentRSIHigh < baseRSIHigh * 0.95) {
+        rsiDivBonus -= 0.25;
+      }
     }
   }
   rsiScore = clamp(rsiScore, -1, 1);
 
   // ---- 3. 均线系统维度 ----
   let maScore = 0;
-  // (a) 价格 vs 各均线
   if (current > lastMA5) maScore += 0.1; else maScore -= 0.1;
   if (current > lastMA20) maScore += 0.15; else maScore -= 0.15;
   if (current > lastMA60) maScore += 0.2; else maScore -= 0.2;
   if (lastMA120 != null) { if (current > lastMA120) maScore += 0.25; else maScore -= 0.25; }
-  // (b) 均线排列
   if (lastMA5 > lastMA20 && lastMA20 > lastMA60) maScore += 0.3;
   else if (lastMA5 < lastMA20 && lastMA20 < lastMA60) maScore -= 0.3;
-  // (c) MA5 与 MA20 的距离（趋势强度）
   if (lastMA20 > 0) {
     const maGap = (lastMA5 - lastMA20) / lastMA20;
     maScore += clamp(maGap * 20, -0.15, 0.15);
@@ -635,134 +644,128 @@ function generateSignal(data) {
   if (lastBBL != null && lastBBU != null) {
     const bbWidth = lastBBU - lastBBL;
     if (bbWidth > 0) {
-      const bbPos = (current - lastBBL) / bbWidth; // 0=下轨, 1=上轨
-      bbScore += clamp((0.5 - bbPos) * 2, -1, 1); // 越低分越高
-    }
-    // 布林带收窄（波动率压缩，酝酿突破方向不明）
-    if (len > 25) {
-      const prevBBW = (bb.upper[len-6] || 0) - (bb.lower[len-6] || 0);
-      if (prevBBW > 0 && bbWidth < prevBBW * 0.7) {
-        // 布林带显著收窄 → 信号不确定性增加，轻微降权（乘以0.9）
-      }
+      const bbPos = (current - lastBBL) / bbWidth;
+      bbScore += clamp((0.5 - bbPos) * 2, -1, 1);
     }
   }
   bbScore = clamp(bbScore, -1, 1);
 
-  // ---- 5. 成交量维度 ----
+  // ---- 5. 成交量维度（提升异常放量权重）----
   let volScore = 0;
   const avgVol20 = data.slice(-21, -1).reduce((s, d) => s + d.volume, 0) / 20;
   const volRatio = data[len-1].volume / avgVol20;
   const priceUp = current > data[len-2].close;
-  // (a) 放量上涨
   if (volRatio > 1.5 && priceUp) volScore += 0.5;
   else if (volRatio > 1.2 && priceUp) volScore += 0.25;
-  // (b) 放量下跌
   else if (volRatio > 1.5 && !priceUp) volScore -= 0.5;
   else if (volRatio > 1.2 && !priceUp) volScore -= 0.25;
-  // (c) 缩量上涨（健康）
   else if (volRatio < 0.7 && priceUp) volScore += 0.15;
-  // (d) 缩量下跌
   else if (volRatio < 0.7 && !priceUp) volScore -= 0.1;
-  // (e) 异常放量（无论方向，都是关注信号）
-  if (volRatio > 2.5 && priceUp) volScore = clamp(volScore + 0.1, -1, 1);
-  if (volRatio > 2.5 && !priceUp) volScore = clamp(volScore - 0.1, -1, 1);
+  // 异常放量权重提升（天量往往是转折点）
+  if (volRatio > 2.5 && priceUp) volScore = clamp(volScore + 0.25, -1, 1);
+  if (volRatio > 2.5 && !priceUp) volScore = clamp(volScore - 0.25, -1, 1);
+  // 极端天量（>4倍）进一步放大
+  if (volRatio > 4.0 && priceUp) volScore = clamp(volScore + 0.15, -1, 1);
+  if (volRatio > 4.0 && !priceUp) volScore = clamp(volScore - 0.15, -1, 1);
   volScore = clamp(volScore, -1, 1);
 
-  // ---- 6. 趋势强度辅助维度（用于动态权重，不直接参与评分）----
-  // 简化版：看 MACD 维度和均线维度的绝对值
-  const trendStrength = (Math.abs(macdScore) + Math.abs(maScore)) / 2; // 0~1
+  // ---- 6. 52周位置维度（新增）----
+  let pos52Score = 0;
+  if (posIn52w < 0.15) pos52Score += 0.35;
+  else if (posIn52w < 0.25) pos52Score += 0.2;
+  else if (posIn52w < 0.4) pos52Score += 0.05;
+  else if (posIn52w > 0.85) pos52Score -= 0.35;
+  else if (posIn52w > 0.75) pos52Score -= 0.2;
+  else if (posIn52w > 0.6) pos52Score -= 0.05;
+  pos52Score = clamp(pos52Score, -1, 1);
+
+  // ---- 趋势强度 ----
+  const trendStrength = (Math.abs(macdScore) + Math.abs(maScore)) / 2;
 
   // ========================================
-  // 加权合成 + 动态权重
+  // 加权合成 + 动态权重（6维）
   // ========================================
-  // 趋势强（>0.5）→ MACD↑ MA↑；趋势弱（<0.3）→ RSI↑ BB↑
-  let wMACD, wRSI, wMA, wBB, wVol;
+  let wMACD, wRSI, wMA, wBB, wVol, w52w;
+
   if (trendStrength > 0.5) {
-    wMACD = 0.28; wMA = 0.25; wRSI = 0.17; wBB = 0.15; wVol = 0.15;
+    wMACD = 0.24; wMA = 0.22; wRSI = 0.14; wBB = 0.13; wVol = 0.14; w52w = 0.13;
   } else if (trendStrength < 0.3) {
-    wMACD = 0.18; wMA = 0.18; wRSI = 0.25; wBB = 0.22; wVol = 0.17;
+    wMACD = 0.16; wMA = 0.14; wRSI = 0.22; wBB = 0.18; wVol = 0.14; w52w = 0.16;
   } else {
-    // 中间线性插值
-    const t = (trendStrength - 0.3) / 0.2; // 0~1
-    wMACD = 0.18 + t * 0.10;
-    wMA = 0.18 + t * 0.07;
-    wRSI = 0.25 - t * 0.08;
-    wBB = 0.22 - t * 0.07;
-    wVol = 0.17 - t * 0.02;
+    const t = (trendStrength - 0.3) / 0.2;
+    wMACD = 0.16 + t * 0.08;
+    wMA = 0.14 + t * 0.08;
+    wRSI = 0.22 - t * 0.08;
+    wBB = 0.18 - t * 0.05;
+    wVol = 0.14;
+    w52w = 0.16 - t * 0.03;
   }
 
-  const rawComposite = wMACD * macdScore + wRSI * rsiScore + wMA * maScore + wBB * bbScore + wVol * volScore;
+  // 背离奖励叠加到最终 rawComposite 上（不经过权重压缩，保持力度）
+  const rawComposite = wMACD * macdScore + wRSI * rsiScore + wMA * maScore
+                      + wBB * bbScore + wVol * volScore + w52w * pos52Score
+                      + rsiDivBonus;
   const score = tanhMap(rawComposite);
 
   // ========================================
   // 周期股策略 + 仓位计算
   // ========================================
-  const isNewHigh = current >= histHigh;
+
+  // 历史新高判断：突破 2% + 放量确认
+  const avgVolume = data.slice(-21).reduce((s, d) => s + d.volume, 0) / 21;
+  const isNewHigh = current > histHigh * 1.02 && data[len-1].volume > avgVolume * 1.2;
   const isAboveMA120 = lastMA120 != null && current > lastMA120;
 
-  // ATR 波动率系数：波动越大，仓位越保守
-  // 目标波动率 2%，当前 ATR% 偏离时调整
+  // ATR 波动率系数（收紧下限）
   const targetATRPct = 0.02;
-  const volAdj = clamp(targetATRPct / Math.max(atrPct, 0.005), 0.5, 1.3);
+  const volAdj = clamp(targetATRPct / Math.max(atrPct, 0.005), 0.3, 1.3);
 
-  // 基础仓位：score 连续映射
-  // score 3~97 → position 10~85
+  // 基础仓位
   let basePosition = 10 + (score - 3) / 94 * 75;
-
-  // 应用波动率调整
   let position = Math.round(basePosition * volAdj);
 
-  // ---- 硬性止损：跌破MA120较远时强制减仓 ----
+  // 硬性止损（收紧：12%/8% 两档）
   let forceStop = false;
   if (lastMA120 != null) {
     const ma120Dist = (current - lastMA120) / lastMA120;
-    if (ma120Dist < -0.15) {
-      // 跌破年线15%+，强制大幅减仓
+    if (ma120Dist < -0.12) {
       forceStop = true;
       position = Math.min(position, 10);
-    } else if (ma120Dist < -0.10) {
-      // 跌破年线10%+，限制仓位上限
-      position = Math.min(position, 25);
+    } else if (ma120Dist < -0.08) {
+      position = Math.min(position, 22);
     }
   }
 
-  // ---- 周期股底仓保护（仅未创新高 + 非硬止损时生效）----
+  // 周期股底仓保护
   if (!isNewHigh && !forceStop) {
     if (isAboveMA120) {
-      position = Math.max(position, 30); // 在年线上方，最低保持30%
+      position = Math.max(position, 30);
     } else {
       const ma120Dist = lastMA120 ? (current - lastMA120) / lastMA120 : 0;
-      if (ma120Dist > -0.08) {
-        position = Math.max(position, 20); // 跌破年线不远，最低20%
+      if (ma120Dist > -0.06) {
+        position = Math.max(position, 20);
       }
-      // 跌破年线较远时由硬止损规则接管，不做底仓保护
     }
   }
 
   position = clamp(position, 0, 85);
 
-  // ---- 确定操作建议 ----
+  // 操作建议
   let action, signalType, strength;
 
   if (forceStop) {
     if (position <= 10) {
-      action = '跌破重要支撑，建议止损';
-      signalType = 'sell';
-      strength = '强';
+      action = '跌破重要支撑，建议止损'; signalType = 'sell'; strength = '强';
     } else {
-      action = '趋势转弱，大幅减仓';
-      signalType = 'sell';
-      strength = '强';
+      action = '趋势转弱，大幅减仓'; signalType = 'sell'; strength = '强';
     }
   } else if (isNewHigh) {
-    // 突破历史新高 → 正常策略
     if (position >= 70) { action = '买入'; signalType = 'buy'; strength = '强'; }
     else if (position >= 52) { action = '持有'; signalType = 'hold'; strength = '中'; }
     else if (position >= 38) { action = '减仓'; signalType = 'sell'; strength = '中'; }
     else if (position >= 20) { action = '卖出'; signalType = 'sell'; strength = '强'; }
     else { action = '清仓离场'; signalType = 'sell'; strength = '强'; }
   } else {
-    // 未突破历史新高 → 上升通道策略
     if (position >= 62) { action = '买入加仓'; signalType = 'buy'; strength = '强'; }
     else if (position >= 52) { action = '逢低加仓'; signalType = 'buy'; strength = '中'; }
     else if (position >= 42) { action = '持有观望'; signalType = 'hold'; strength = '弱'; }
@@ -770,14 +773,14 @@ function generateSignal(data) {
     else { action = '控制仓位'; signalType = 'hold'; strength = '中'; }
   }
 
-  // ---- 趋势判断 ----
+  // 趋势判断
   let trend;
   if (current > lastMA60 && lastMA5 > lastMA20) trend = '上升趋势';
   else if (current > lastMA60) trend = '震荡偏多';
   else if (current > lastMA120) trend = '区间震荡';
   else trend = '下降趋势';
 
-  // ---- 支撑/压力 ----
+  // 支撑/压力
   const support = Math.max(lastMA20 || 0, lastMA60 || 0, lastBBL || 0);
   const resist = Math.min(lastBBU || 9999, histHigh);
 
@@ -788,13 +791,14 @@ function generateSignal(data) {
     current, histHigh, isNewHigh,
     posIn52w, high52w, low52w,
     atrPct, volAdj, forceStop,
-    weights: { wMACD: wMACD.toFixed(2), wRSI: wRSI.toFixed(2), wMA: wMA.toFixed(2), wBB: wBB.toFixed(2), wVol: wVol.toFixed(2) },
-    dimensionScores: { macd: macdScore, rsi: rsiScore, ma: maScore, bb: bbScore, vol: volScore },
+    weights: { wMACD: wMACD.toFixed(2), wRSI: wRSI.toFixed(2), wMA: wMA.toFixed(2), wBB: wBB.toFixed(2), wVol: wVol.toFixed(2), w52w: w52w.toFixed(2) },
+    dimensionScores: { macd: macdScore, rsi: rsiScore, ma: maScore, bb: bbScore, vol: volScore, pos52w: pos52Score },
     indicators: {
       macd: { dif: lastDif, dea: lastDea, hist: lastMACD, prevHist: prev(macd.macd) },
       rsi: lastRSI,
       bbPos: lastBBL && lastBBU ? ((current - lastBBL) / (lastBBU - lastBBL) * 100) : null,
       ma120: lastMA120,
+      rsiDivBonus,
     },
     ma120: lastMA120,
     data
@@ -804,9 +808,6 @@ function generateSignal(data) {
 // ============================================
 // 数据获取 - 新浪财经
 // ============================================
-// 新浪实时行情格式：
-// A股: var hq_str_sz002460="名称,今开,昨收,当前,最高,最低,买一,卖一,成交量,成交额,..."
-// 港股: var hq_str_rt_hk01772="英文,中文,昨收,开盘,最高,最低,涨跌额,涨幅,当前,..."
 
 async function fetchRealtime() {
   try {
@@ -814,7 +815,6 @@ async function fetchRealtime() {
     if (!text) return { sz: null, hk: null };
     const result = { sz: null, hk: null };
 
-    // 解析A股
     const szMatch = text.match(/hq_str_sz002460="([^"]*)"/);
     if (szMatch) {
       const p = szMatch[1].split(',');
@@ -832,8 +832,6 @@ async function fetchRealtime() {
       };
     }
 
-    // 解析港股 (rt_hk01772)
-    // 格式: 英文名,中文名,昨收,开盘,最高,最低,当前价,涨跌额,涨幅%,买一价,卖一价,成交额,成交量,...
     const hkMatch = text.match(/hq_str_rt_hk01772="([^"]*)"/);
     if (hkMatch) {
       const p = hkMatch[1].split(',');
@@ -843,7 +841,7 @@ async function fetchRealtime() {
         open: parseFloat(p[3]),
         high: parseFloat(p[4]),
         low: parseFloat(p[5]),
-        price: parseFloat(p[6]),     // 当前价 index 6
+        price: parseFloat(p[6]),
         change: parseFloat(p[7]),
         changePct: parseFloat(p[8]),
         volume: parseFloat(p[12]),
@@ -860,7 +858,6 @@ async function fetchRealtime() {
 async function fetchKline(stock, period) {
   try {
     if (stock === 'sz') {
-      // A股用新浪K线: symbol sz002460, scale 240=日线 1200=周线
       const scale = period === 'daily' ? '240' : '1200';
       const text = await fetchText(`/api/kline?symbol=sz002460&scale=${scale}&ma=no&datalen=300`);
       if (!text || text === 'null') return [];
@@ -874,7 +871,6 @@ async function fetchKline(stock, period) {
         volume: parseFloat(item.volume),
       })).filter(d => d.close > 0);
     } else {
-      // 港股用腾讯K线
       const ktype = period === 'daily' ? 'day' : 'week';
       const text = await fetchText(`/api/kline-tencent?symbol=hk01772&ktype=${ktype}`);
       if (!text) return [];
@@ -902,7 +898,6 @@ async function fetchKline(stock, period) {
 function updateRealtimeCard(stock, d) {
   if (!d) return;
   const prefix = stock === 'sz' ? 'SZ' : 'HK';
-  // 开盘前当前价为0时，使用昨收价作为显示价格
   const p = (d.price > 0) ? d.price : d.prevClose;
   const prevClose = d.prevClose;
   const change = (d.price > 0) ? (p - prevClose) : 0;
@@ -969,7 +964,6 @@ function updateChart(data) {
       scaleMargins: { top: 0.8, bottom: 0 },
     });
 
-    // 均线
     const maColors = { ma5: '#f59e0b', ma10: '#8b5cf6', ma20: '#06b6d4', ma60: '#ef4444', ma120: '#10b981' };
     for (const [key, color] of Object.entries(maColors)) {
       STATE.maLines[key] = STATE.chart.addLineSeries({
@@ -977,7 +971,6 @@ function updateChart(data) {
       });
     }
 
-    // 布林带
     STATE.bbUpper = STATE.chart.addLineSeries({
       color: 'rgba(139,92,246,0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
     });
@@ -985,7 +978,6 @@ function updateChart(data) {
       color: 'rgba(139,92,246,0.4)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
     });
 
-    // resize
     new ResizeObserver(() => {
       STATE.chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight });
     }).observe(chartContainer);
@@ -1001,7 +993,6 @@ function updateChart(data) {
   STATE.candleSeries.setData(candleData);
   STATE.volumeSeries.setData(volData);
 
-  // 均线
   const ma5 = calcMA(data, 5);
   const ma10 = calcMA(data, 10);
   const ma20 = calcMA(data, 20);
@@ -1015,14 +1006,12 @@ function updateChart(data) {
   STATE.maLines.ma60.setData(toLine(ma60));
   STATE.maLines.ma120.setData(toLine(ma120));
 
-  // 布林带
   const bb = calcBollinger(data);
   STATE.bbUpper.setData(toLine(bb.upper));
   STATE.bbLower.setData(toLine(bb.lower));
 
   STATE.chart.timeScale().fitContent();
 
-  // 数据范围
   if (data.length > 0) {
     document.getElementById('dataRange').textContent = data[0].time + ' 至 ' + data[data.length-1].time;
   }
@@ -1034,14 +1023,12 @@ function updateIndicators(signal) {
   const macd = indicators.macd;
   const cls = macd.hist > 0 ? 'up' : 'down';
 
-  // MACD
   document.getElementById('macdValue').textContent = fmt(macd.hist, 4);
   document.getElementById('macdValue').className = 'ind-value ' + cls;
   const macdDir = macd.hist > macd.prevHist ? '↑ 柱体放大' : macd.hist < macd.prevHist ? '↓ 柱体缩小' : '— 无变化';
   const macdSignal = macd.dif > macd.dea ? '金叉状态' : '死叉状态';
   document.getElementById('macdSub').textContent = `${macdSignal} · ${macdDir}`;
 
-  // MACD mini bars (last 20)
   const macdCalc = calcMACD(signal.data);
   const macdLast20 = macdCalc.macd.slice(-20);
   const barsHtml = macdLast20.map(v => {
@@ -1051,7 +1038,6 @@ function updateIndicators(signal) {
   }).join('');
   document.getElementById('macdBars').innerHTML = barsHtml;
 
-  // RSI
   const rsi = indicators.rsi;
   if (rsi != null) {
     document.getElementById('rsiValue').textContent = fmt(rsi, 1);
@@ -1067,7 +1053,6 @@ function updateIndicators(signal) {
     document.getElementById('rsiBar').style.background = rsiColor;
   }
 
-  // 布林带
   if (indicators.bbPos != null) {
     document.getElementById('bbValue').textContent = fmt(indicators.bbPos, 1) + '%';
     const bbPos = indicators.bbPos;
@@ -1079,7 +1064,6 @@ function updateIndicators(signal) {
     document.getElementById('bbBar').style.background = bbPos < 30 ? 'var(--green)' : bbPos > 70 ? 'var(--red)' : 'var(--cyan)';
   }
 
-  // 综合评分
   const score = signal.score;
   document.getElementById('scoreValue').textContent = score;
   const scoreColor = score > 65 ? 'var(--green)' : score < 35 ? 'var(--red)' : 'var(--yellow)';
@@ -1092,9 +1076,8 @@ function updateIndicators(signal) {
   else if (score > 30) scoreLabel = '偏空';
   else scoreLabel = '强烈看空';
 
-  // 动态权重信息
   const w = signal.weights;
-  const wStr = `MACD${w.wMACD} RSI${w.wRSI} MA${w.wMA} BB${w.wBB} VOL${w.wVol}`;
+  const wStr = `MACD${w.wMACD} RSI${w.wRSI} MA${w.wMA} BB${w.wBB} VOL${w.wVol} 52W${w.w52w}`;
   document.getElementById('scoreSub').textContent = scoreLabel + '  权重[' + wStr + ']';
   document.getElementById('scoreBar').style.width = score + '%';
   document.getElementById('scoreBar').style.background = scoreColor;
@@ -1192,7 +1175,6 @@ async function init() {
   }
 }
 
-// 自动刷新
 setInterval(() => {
   STATE.refreshCountdown--;
   document.getElementById('refreshTimer').textContent = STATE.refreshCountdown + 's 后刷新';
