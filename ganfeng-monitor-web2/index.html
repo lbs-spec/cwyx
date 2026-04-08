@@ -692,7 +692,7 @@ function generateSignal(data) {
   }
 
   const rawComposite = wMACD * macdScore + wRSI * rsiScore + wMA * maScore + wBB * bbScore + wVol * volScore;
-  const score = tanhMap(rawComposite, 0.55);
+  const score = tanhMap(rawComposite);
 
   // ========================================
   // 周期股策略 + 仓位计算
